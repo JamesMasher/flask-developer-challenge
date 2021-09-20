@@ -8,7 +8,7 @@ module implements a Flask server exposing two endpoints: a simple ping
 endpoint to verify the server is up and responding and a search endpoint
 providing a search across all public Gists for a given Github account.
 """
-
+import re
 import requests
 from flask import Flask, jsonify, request
 
@@ -19,68 +19,85 @@ app = Flask(__name__)
 
 @app.route("/ping")
 def ping():
-    """Provide a static response to a simple GET request."""
-    return "pong"
+   """Provide a static response to a simple GET request."""
+   return "pong"
 
 
 def gists_for_user(username):
-    """Provides the list of gist metadata for a given user.
+   """Provides the list of gist metadata for a given user.
 
-    This abstracts the /users/:username/gist endpoint from the Github API.
-    See https://developer.github.com/v3/gists/#list-a-users-gists for
-    more information.
+   This abstracts the /users/:username/gist endpoint from the Github API.
+   See https://developer.github.com/v3/gists/#list-a-users-gists for
+   more information.
 
-    Args:
-        username (string): the user to query gists for
+   Args:
+       username (string): the user to query gists for
 
-    Returns:
-        The dict parsed from the json response from the Github API.  See
-        the above URL for details of the expected structure.
-    """
-    gists_url = 'https://api.github.com/users/{username}/gists'.format(
-            username=username)
-    response = requests.get(gists_url)
-    # BONUS: What failures could happen?
-    # BONUS: Paging? How does this work for users with tons of gists?
+   Returns:
+       The dict parsed from the json response from the Github API.  See
+       the above URL for details of the expected structure.
+   """
+   gists_url = 'https://api.github.com/users/{username}/gists'.format(
+           username=username)
+   response = requests.get(gists_url)
+   # BONUS: What failures could happen?
+   # BONUS: Paging? How does this work for users with tons of gists?
 
-    return response.json()
+   return response.json()
 
 
 @app.route("/api/v1/search", methods=['POST'])
 def search():
-    """Provides matches for a single pattern across a single users gists.
+   """Provides matches for a single pattern across a single users gists.
 
-    Pulls down a list of all gists for a given user and then searches
-    each gist for a given regular expression.
+   Pulls down a list of all gists for a given user and then searches
+   each gist for a given regular expression.
 
-    Returns:
-        A Flask Response object of type application/json.  The result
-        object contains the list of matches along with a 'status' key
-        indicating any failure conditions.
-    """
-    post_data = request.get_json()
-    # BONUS: Validate the arguments?
+   Returns:
+       A Flask Response object of type application/json.  The result
+       object contains the list of matches along with a 'status' key
+       indicating any failure conditions.
+   """
+   post_data = request.get_json()
+   # BONUS: Validate the arguments?
 
-    username = post_data['username']
-    pattern = post_data['pattern']
+   if 'username' not in post_data:
+       return jsonify({"Message": "Username is required"}), 400
+   if 'pattern' not in post_data:
+       return jsonify({"Message": "Pattern is required"}), 400
 
-    result = {}
-    gists = gists_for_user(username)
-    # BONUS: Handle invalid users?
+   username = post_data['username']
+   pattern = post_data['pattern']
 
-    for gist in gists:
-        # REQUIRED: Fetch each gist and check for the pattern
-        # BONUS: What about huge gists?
-        # BONUS: Can we cache results in a datastore/db?
-        pass
+   result = {}
+   gists = gists_for_user(username)
+   # BONUS: Handle invalid users?
 
-    result['status'] = 'success'
-    result['username'] = username
-    result['pattern'] = pattern
-    result['matches'] = []
+   if type(gists) != "list":
+       return jsonify({"Message": "Invalid github user"}), 400
 
-    return jsonify(result)
+   matches = []
+   for gist in gists:
+       # REQUIRED: Fetch each gist and check for the pattern
+       files = gist['files']
+       for file in files:
+           content_url = files[file]['raw_url']
+           content = requests.get(content_url).text
+
+           isMatch = re.match(pattern, content)
+           if isMatch:
+               matches.append(f'https://gist.github.com/{username}/{gist['id']}')
+       # BONUS: What about huge gists?
+       # BONUS: Can we cache results in a datastore/db?
+
+
+   result['status'] = 'success'
+   result['username'] = username
+   result['pattern'] = pattern
+   result['matches'] = matches
+
+   return jsonify(result)
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=9876)
+   app.run(debug=True, host='0.0.0.0', port=9876)
